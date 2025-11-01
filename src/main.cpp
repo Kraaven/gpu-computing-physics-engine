@@ -1,42 +1,26 @@
 #include <iostream>
-#include <vector>
-#include <omp.h>
 #include "raylib.h"
-
-// Quick test: small vector sum using OpenMP reduction
-long long test_openmp_sum(int N = 1000000) {
-    std::vector<int> arr(N, 1);
-    long long sum = 0;
-    #pragma omp parallel for reduction(+:sum)
-    for (int i = 0; i < N; ++i) sum += arr[i];
-    return sum;
-}
+#include "Vec2.h"
+#include "Body.h"
 
 int main() {
-    // Print OpenMP info
-    #ifdef _OPENMP
-    std::cout << "OpenMP is enabled. Max threads: " << omp_get_max_threads() << std::endl;
-    #else
-    std::cout << "OpenMP NOT enabled." << std::endl;
-    #endif
-
-    long long s = test_openmp_sum(1000000);
-    std::cout << "OpenMP test sum: " << s << std::endl;
-
-    // Initialize RayLib window
-    const int screenW = 1024;
-    const int screenH = 720;
-    InitWindow(screenW, screenH, "Physics Engine Starter (C++ / OpenMP / RayLib)");
+    InitWindow(800, 600, "Physics Engine Step 2 - Vec2 + Body Test");
     SetTargetFPS(60);
 
-    // Simple loop (we won't do physics here yet)
+    Body circle({400, 300}, 2.0f);
+    circle.collider.radius = 25.0f;
+    circle.color = RED;
+
+    std::cout << "Created body at position " << circle.position
+              << " with mass " << circle.mass
+              << " and inverse mass " << circle.invMass << std::endl;
+
     while (!WindowShouldClose()) {
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        DrawText("Physics Engine Starter (C++ / OpenMP / RayLib)", 20, 20, 20, DARKGRAY);
-        DrawText(TextFormat("OpenMP threads: %d", omp_get_max_threads()), 20, 50, 18, LIGHTGRAY);
-        DrawText("Press ESC or close window to quit", 20, 80, 18, LIGHTGRAY);
+        DrawText("Step 2: Vec2 + Body structure test", 20, 20, 20, DARKGRAY);
+        DrawCircleV({circle.position.x, circle.position.y}, circle.collider.radius, circle.color);
 
         EndDrawing();
     }
