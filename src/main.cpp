@@ -1,26 +1,43 @@
-#include <iostream>
 #include "raylib.h"
 #include "Vec2.h"
 #include "Body.h"
+#include "PhysicsWorld.h"
+#include <iostream>
 
 int main() {
-    InitWindow(800, 600, "Physics Engine Step 2 - Vec2 + Body Test");
-    SetTargetFPS(60);
+    InitWindow(800, 600, "Physics Engine Step 3 - PhysicsWorld");
+    SetTargetFPS(120);
 
-    Body circle({400, 300}, 2.0f);
-    circle.collider.radius = 25.0f;
-    circle.color = RED;
+    PhysicsWorld world;
 
-    std::cout << "Created body at position " << circle.position
-              << " with mass " << circle.mass
-              << " and inverse mass " << circle.invMass << std::endl;
+    // Create a few test bodies
+    Body ball1({200, 100}, 1.0f);
+    ball1.collider.radius = 20.0f;
+    ball1.color = RED;
+
+    Body ball2({400, 200}, 2.0f);
+    ball2.collider.radius = 30.0f;
+    ball2.color = BLUE;
+
+    Body ball3({600, 50}, 0.5f);
+    ball3.collider.radius = 15.0f;
+    ball3.color = GREEN;
+
+    world.addBody(ball1);
+    world.addBody(ball2);
+    world.addBody(ball3);
 
     while (!WindowShouldClose()) {
+        world.step();
+
         BeginDrawing();
         ClearBackground(RAYWHITE);
+        DrawText("Step 3: PhysicsWorld - Gravity + Integration", 20, 20, 20, DARKGRAY);
 
-        DrawText("Step 2: Vec2 + Body structure test", 20, 20, 20, DARKGRAY);
-        DrawCircleV({circle.position.x, circle.position.y}, circle.collider.radius, circle.color);
+        // Draw each body
+        for (const auto& b : world.bodies) {
+            DrawCircleV({b.position.x, b.position.y}, b.collider.radius, b.color);
+        }
 
         EndDrawing();
     }
