@@ -5,6 +5,8 @@
 #include <omp.h>
 #include <vector>
 #include <mutex>
+#include <iostream>
+
 
 // Contact (collision) info
 struct Contact {
@@ -26,6 +28,12 @@ public:
   float defaultRestitution = 0.6f;
   float positionalCorrectionPercent = 0.4f;
   float positionalCorrectionSlop = 0.02f;
+
+    // safety limits
+  float maxVelocity = 3000.0f;        // clamp velocity magnitude
+  float maxImpulse = 20000.0f;        // clamp single impulse magnitude
+  float maxPosCorrection = 200.0f;    // limit positional correction in pixels
+
 
   PhysicsWorld() = default;
 
@@ -187,7 +195,7 @@ public:
   // --------------------
   // Collision resolution: impulse + positional correction
   // --------------------
-  void resolveCollision(const Contact &c) {
+    void resolveCollision(const Contact &c) {
     Body &A = bodies[c.a];
     Body &B = bodies[c.b];
 
@@ -223,7 +231,6 @@ public:
     j /= invMassSum;
 
     // clamp impulse to avoid explosion on deep penetrations
-    float maxImpulse = 10000.0f;
     if (j > maxImpulse) j = maxImpulse;
     if (j < -maxImpulse) j = -maxImpulse;
 
@@ -235,17 +242,21 @@ public:
       B.velocity += impulse * invMassB;
 
     // Positional correction to avoid sinking (baumgarte-like)
-    const float percent = positionalCorrectionPercent; // 0.2 - 0.8
-    const float slop = positionalCorrectionSlop;       // small allowance
+    const float percent = positionalCorrectionPercent; // usually 20% - 80%
+    const float slop = positionalCorrectionSlop;       // penetration allowance
     float penetration = c.penetration;
     float correctionMagnitude =
         std::max(penetration - slop, 0.0f) / invMassSum * percent;
+
+    // clamp correction magnitude to avoid teleporting
+    if (correctionMagnitude > maxPosCorrection) correctionMagnitude = maxPosCorrection;
     Vec2 correction = n * correctionMagnitude;
     if (!A.isStatic)
       A.position -= correction * invMassA;
     if (!B.isStatic)
       B.position += correction * invMassB;
   }
+
 
   // --------------------
   // Main step: apply forces, integrate, detect & solve collisions
@@ -333,5 +344,23 @@ public:
       for (const auto &c : contacts)
         resolveCollision(c);
     }
+
+        // --- 6) Sanity clamp (prevent NaNs / runaway values)
+    for (int i = 0; i < (int)bodies.size(); ++i) {
+      Body &b = bodies[i];
+      // If invalid numbers appear, reset to prevPosition
+      if (!std::isfinite(b.position.x) || !std::isfinite(b.position.y) ||
+          !std::isfinite(b.velocity.x) || !std::isfinite(b.velocity.y)) {
+        std::cerr << "[PhysicsWorld] Invalid body detected at index " << i << " — resetting.\n";
+        b.position = b.prevPosition;
+        b.velocity = Vec2::zero();
+        b.force = Vec2::zero();
+        continue;
+      }
+
+      // clamp velocity and positions
+      b.clampSanity(/*maxPos=*/1e6f, /*maxVel=*/maxVelocity);
+    }
+
   }
 };

@@ -23,7 +23,7 @@ struct SpatialHash {
     cy = (int)std::floor(pos.y / cellSize);
   }
 
-  void insert(const std::vector<Body> &bodies, int index) {
+    void insert(const std::vector<Body> &bodies, int index) {
     const Body &b = bodies[index];
     Vec2 minPos, maxPos;
 
@@ -41,6 +41,13 @@ struct SpatialHash {
     int maxX = (int)std::floor(maxPos.x / cellSize);
     int maxY = (int)std::floor(maxPos.y / cellSize);
 
+    // Clamp the range to avoid insane insertions (protect against huge AABBs)
+    const int CLAMP_CELLS = 1024; // ~65536 world width at 64px cell -> keeps bounded
+    if (minX < -CLAMP_CELLS) minX = -CLAMP_CELLS;
+    if (minY < -CLAMP_CELLS) minY = -CLAMP_CELLS;
+    if (maxX > CLAMP_CELLS) maxX = CLAMP_CELLS;
+    if (maxY > CLAMP_CELLS) maxY = CLAMP_CELLS;
+
     for (int y = minY; y <= maxY; ++y) {
       for (int x = minX; x <= maxX; ++x) {
         long long key = hashCoords(x, y);
@@ -49,6 +56,7 @@ struct SpatialHash {
       }
     }
   }
+
 
   std::vector<std::pair<int, int>> getCandidatePairs() const {
     std::vector<std::pair<int, int>> pairs;
