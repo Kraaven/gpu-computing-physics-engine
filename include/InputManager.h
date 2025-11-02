@@ -12,11 +12,20 @@ public:
   float forceStrength = 200000.0f;
   float influenceRadius = 200.0f;
 
+  // debug toggles
+  bool showContacts = false;
+  bool gravityEnabled = true;
+
   void handleInput(PhysicsWorld &world) {
     // Toggle between Object and Force mode with SPACE
     if (IsKeyPressed(KEY_SPACE)) {
       mode = (mode == InputMode::Object) ? InputMode::Force : InputMode::Object;
     }
+
+    // Debug toggles
+    if (IsKeyPressed(KEY_D)) showContacts = !showContacts;
+    if (IsKeyPressed(KEY_G)) gravityEnabled = !gravityEnabled;
+    if (IsKeyPressed(KEY_C)) clearDynamic(world);
 
     Vector2 mouse = GetMousePosition();
     Vec2 mpos(mouse.x, mouse.y);
@@ -26,12 +35,22 @@ public:
     } else {
       handleForceMode(world, mpos);
     }
+
+    // apply gravity toggle to world
+    if (!gravityEnabled) world.gravity = Vec2::zero();
+    else world.gravity = {0.0f, 300.0f};
   }
 
 private:
-  // ------------------------------------
-  // Object Mode: spawn/delete circles
-  // ------------------------------------
+  void clearDynamic(PhysicsWorld &world) {
+    // remove non-static bodies
+    for (int i = (int)world.bodies.size() - 1; i >= 0; --i) {
+      if (!world.bodies[i].isStatic)
+        world.bodies.erase(world.bodies.begin() + i);
+    }
+  }
+
+  // Object Mode
   void handleObjectMode(PhysicsWorld &world, const Vec2 &mousePos) {
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
       Body b(mousePos, 1.0f);
@@ -42,13 +61,10 @@ private:
     }
 
     if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-      // Find first body under cursor
       for (int i = (int)world.bodies.size() - 1; i >= 0; --i) {
         Body &b = world.bodies[i];
-        if (b.isStatic)
-          continue;
-        if (b.collider.type != ShapeType::Circle)
-          continue;
+        if (b.isStatic) continue;
+        if (b.collider.type != ShapeType::Circle) continue;
 
         Vec2 d = mousePos - b.position;
         if (d.length2() <= b.collider.radius * b.collider.radius) {
@@ -59,37 +75,29 @@ private:
     }
   }
 
-  // ------------------------------------
-  // Force Mode: repel / attract bodies
-  // ------------------------------------
+  // Force Mode
   void handleForceMode(PhysicsWorld &world, const Vec2 &mousePos) {
     bool attract = IsMouseButtonDown(MOUSE_RIGHT_BUTTON);
     bool repel = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
 
-    if (!attract && !repel)
-      return;
+    if (!attract && !repel) return;
 
     for (auto &b : world.bodies) {
-      if (b.isStatic)
-        continue;
+      if (b.isStatic) continue;
 
       Vec2 dir = b.position - mousePos;
       float dist2 = dir.length2();
 
-      // Skip if out of influence range
-      if (dist2 > influenceRadius * influenceRadius)
-        continue;
+      if (dist2 > influenceRadius * influenceRadius) continue;
 
       float dist = std::sqrt(std::max(dist2, 1.0f));
       Vec2 n = dir / dist; // direction from mouse → body
 
-      if (attract)
-        n = n * -1.0f;
+      if (attract) n = n * -1.0f;
 
-      // Instead of 1/d^2, use 1/d falloff (more visible)
       float strength = forceStrength / (dist + 100.0f);
 
-      // Apply impulse-like kick rather than gentle acceleration
+      // apply velocity kick
       b.velocity += n * (strength * world.dt);
     }
   }
