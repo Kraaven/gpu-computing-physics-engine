@@ -19,6 +19,7 @@ int main() {
     Renderer renderer;
 
     scene.loadDefault(world);
+    input.recomputeLayout();
 
     // Fixed timestep parameters
     const double fixedDt = world.dt; // use world.dt consistently
@@ -33,7 +34,7 @@ int main() {
         lastTime = now;
         accumulator += frameTime;
 
-        // Input (non-blocking)
+        input.recomputeLayout();
         input.handleInput(world);
 
         // Step physics one or more times at fixedDt
