@@ -2,20 +2,27 @@
 #include "Body.h"
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#include <algorithm>
 
 struct SpatialHash {
   float cellSize;
   std::unordered_map<long long, std::vector<int>> cells;
 
   SpatialHash(float cs = 64.0f) : cellSize(cs) {
-    cells.reserve(1024);
+    cells.reserve(2048);
   }
 
-  void clear() { cells.clear(); }
+  void clear() { 
+    // Reuse allocated memory instead of clearing
+    for (auto &kv : cells) {
+      kv.second.clear();
+    }
+  }
 
   static inline long long hashCoords(int x, int y) {
-    return ((long long)x << 32) ^ (y & 0xffffffff);
+    return ((long long)x << 32) | ((long long)y & 0xFFFFFFFF);
   }
 
   inline void worldToCell(const Vec2 &pos, int &cx, int &cy) const {
@@ -35,49 +42,47 @@ struct SpatialHash {
     int maxY = (int)std::floor(maxPos.y / cellSize);
 
     const int CLAMP_CELLS = 1024;
-    if (minX < -CLAMP_CELLS) minX = -CLAMP_CELLS;
-    if (minY < -CLAMP_CELLS) minY = -CLAMP_CELLS;
-    if (maxX > CLAMP_CELLS) maxX = CLAMP_CELLS;
-    if (maxY > CLAMP_CELLS) maxY = CLAMP_CELLS;
+    minX = std::max(minX, -CLAMP_CELLS);
+    minY = std::max(minY, -CLAMP_CELLS);
+    maxX = std::min(maxX, CLAMP_CELLS);
+    maxY = std::min(maxY, CLAMP_CELLS);
 
     for (int y = minY; y <= maxY; ++y) {
       for (int x = minX; x <= maxX; ++x) {
         long long key = hashCoords(x, y);
-        auto &vec = cells[key];
-        vec.push_back(index);
+        cells[key].push_back(index);
       }
     }
   }
 
+  // OPTIMIZED: Use set to avoid duplicate pairs
   std::vector<std::pair<int, int>> getCandidatePairs() const {
     std::vector<std::pair<int, int>> pairs;
-    pairs.reserve(256);
+    pairs.reserve(cells.size() * 4); // Better initial capacity
 
-    const int offsets[9][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {0, 0},
-                               {1, 0},   {-1, 1}, {0, 1},  {1, 1}};
+    // Use unordered_set to track unique pairs
+    std::unordered_set<long long> seenPairs;
+    seenPairs.reserve(cells.size() * 4);
+
+    // Helper to create unique pair key
+    auto makePairKey = [](int a, int b) -> long long {
+      if (a > b) std::swap(a, b);
+      return ((long long)a << 32) | (long long)b;
+    };
 
     for (const auto &kv : cells) {
-      const long long key = kv.first;
       const auto &indices = kv.second;
-      if (indices.empty()) continue;
+      if (indices.size() < 2) continue;
 
-      int cx = (int)(key >> 32);
-      int cy = (int)(key & 0xffffffff);
-
-      for (int n = 0; n < 9; ++n) {
-        int nx = cx + offsets[n][0];
-        int ny = cy + offsets[n][1];
-        long long nkey = hashCoords(nx, ny);
-
-        auto it = cells.find(nkey);
-        if (it == cells.end()) continue;
-
-        const auto &nindices = it->second;
-
-        for (int i : indices) {
-          for (int j : nindices) {
-            if (i < j)
-              pairs.emplace_back(i, j);
+      // Check pairs within the same cell
+      for (size_t i = 0; i < indices.size(); ++i) {
+        for (size_t j = i + 1; j < indices.size(); ++j) {
+          int a = indices[i];
+          int b = indices[j];
+          long long pairKey = makePairKey(a, b);
+          
+          if (seenPairs.insert(pairKey).second) {
+            pairs.emplace_back(a, b);
           }
         }
       }
@@ -86,16 +91,15 @@ struct SpatialHash {
     return pairs;
   }
 
-  // helper: remove indices of bodies outside rect area (inclusive)
   void removeOutsideArea(std::vector<Body> &bodies, float x, float y, float w, float h) {
-    // naive implementation: iterate bodies and remove those outside. Caller must ensure safe erase semantics.
-    // This is provided for convenience in the liquid scene.
-    for (int i = (int)bodies.size() - 1; i >= 0; --i) {
-      if (bodies[i].isStatic) continue;
-      const Vec2 &p = bodies[i].position;
-      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) {
-        bodies.erase(bodies.begin() + i);
-      }
-    }
+    bodies.erase(
+      std::remove_if(bodies.begin(), bodies.end(), 
+        [x, y, w, h](const Body &b) {
+          if (b.isStatic) return false;
+          const Vec2 &p = b.position;
+          return p.x < x || p.x > x + w || p.y < y || p.y > y + h;
+        }),
+      bodies.end()
+    );
   }
 };

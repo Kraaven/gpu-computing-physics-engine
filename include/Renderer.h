@@ -62,7 +62,7 @@ private:
         Rectangle sliderBar = { input.sliderRect.x, input.sliderRect.y, input.sliderRect.w, input.sliderRect.h };
         DrawRectangleLinesEx(sliderBar, 2.0f, GRAY);
 
-        const float minS = 1.0f, maxS = 24.0f;
+        const float minS = 1.0f, maxS = 100.0f;
 
         float t = (input.spawnSize - minS) / (maxS - minS);
         if (t < 0) {

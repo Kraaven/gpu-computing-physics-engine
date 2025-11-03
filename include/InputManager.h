@@ -17,7 +17,7 @@ class InputManager {
 public:
     InputMode mode = InputMode::Object;
 
-    float spawnSize = 25.0f; // default small for liquid
+    float spawnSize = 20.0f; // default mode spawn size // default small for liquid
     float forceStrength = 200000.0f;
     float influenceRadius = 200.0f;
 
@@ -81,7 +81,7 @@ public:
 
         // update slider knob position from spawnSize
         const float minSize = 1.0f;
-        const float maxSize = 24.0f;
+        const float maxSize = 100.0f;
         float t = (spawnSize - minSize) / (maxSize - minSize);
         if (t < 0) {
             t = 0;
@@ -177,7 +177,7 @@ private:
         if (t > 1) {
             t = 1;
         }
-        const float minSize = 1.0f, maxSize = 24.0f;
+        const float minSize = 1.0f, maxSize = 100.0f;
         spawnSize = minSize + t * (maxSize - minSize);
         sliderKnob.x = sliderRect.x + t * (sliderRect.w - sliderKnob.w);
     }
