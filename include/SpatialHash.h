@@ -14,7 +14,7 @@ struct SpatialHash {
 
   void clear() { cells.clear(); }
 
-  long long hashCoords(int x, int y) const {
+  static inline long long hashCoords(int x, int y) {
     return ((long long)x << 32) ^ (y & 0xffffffff);
   }
 
@@ -23,26 +23,18 @@ struct SpatialHash {
     cy = (int)std::floor(pos.y / cellSize);
   }
 
-    void insert(const std::vector<Body> &bodies, int index) {
+  void insert(const std::vector<Body> &bodies, int index) {
     const Body &b = bodies[index];
-    Vec2 minPos, maxPos;
-
-    if (b.collider.type == ShapeType::Circle) {
-      float r = b.collider.radius;
-      minPos = b.position - Vec2(r, r);
-      maxPos = b.position + Vec2(r, r);
-    } else {
-      minPos = b.position - b.collider.halfExtents;
-      maxPos = b.position + b.collider.halfExtents;
-    }
+    float r = b.collider.radius;
+    Vec2 minPos = b.position - Vec2(r, r);
+    Vec2 maxPos = b.position + Vec2(r, r);
 
     int minX = (int)std::floor(minPos.x / cellSize);
     int minY = (int)std::floor(minPos.y / cellSize);
     int maxX = (int)std::floor(maxPos.x / cellSize);
     int maxY = (int)std::floor(maxPos.y / cellSize);
 
-    // Clamp the range to avoid insane insertions (protect against huge AABBs)
-    const int CLAMP_CELLS = 1024; // ~65536 world width at 64px cell -> keeps bounded
+    const int CLAMP_CELLS = 1024;
     if (minX < -CLAMP_CELLS) minX = -CLAMP_CELLS;
     if (minY < -CLAMP_CELLS) minY = -CLAMP_CELLS;
     if (maxX > CLAMP_CELLS) maxX = CLAMP_CELLS;
@@ -57,7 +49,6 @@ struct SpatialHash {
     }
   }
 
-
   std::vector<std::pair<int, int>> getCandidatePairs() const {
     std::vector<std::pair<int, int>> pairs;
     pairs.reserve(256);
@@ -65,7 +56,9 @@ struct SpatialHash {
     const int offsets[9][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {0, 0},
                                {1, 0},   {-1, 1}, {0, 1},  {1, 1}};
 
-    for (const auto &[key, indices] : cells) {
+    for (const auto &kv : cells) {
+      const long long key = kv.first;
+      const auto &indices = kv.second;
       if (indices.empty()) continue;
 
       int cx = (int)(key >> 32);
@@ -91,5 +84,18 @@ struct SpatialHash {
     }
 
     return pairs;
+  }
+
+  // helper: remove indices of bodies outside rect area (inclusive)
+  void removeOutsideArea(std::vector<Body> &bodies, float x, float y, float w, float h) {
+    // naive implementation: iterate bodies and remove those outside. Caller must ensure safe erase semantics.
+    // This is provided for convenience in the liquid scene.
+    for (int i = (int)bodies.size() - 1; i >= 0; --i) {
+      if (bodies[i].isStatic) continue;
+      const Vec2 &p = bodies[i].position;
+      if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) {
+        bodies.erase(bodies.begin() + i);
+      }
+    }
   }
 };

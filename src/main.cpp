@@ -11,10 +11,10 @@ int main() {
     const int screenW = scene.width;
     const int screenH = scene.height;
 
-    InitWindow(screenW, screenH, "Physics Engine - Stable Simulation");
+    InitWindow(screenW, screenH, "Physics Engine - Circle-only + Liquid");
     SetTargetFPS(120);
 
-    PhysicsWorld world;
+    PhysicsWorld world(32.0f); // finer hash for particles
     InputManager input;
     Renderer renderer;
 
@@ -26,31 +26,38 @@ int main() {
     double accumulator = 0.0;
     double lastTime = GetTime();
 
-    // Main loop
+    // For liquid scene: remember spawn params
+    bool liquidLoaded = false;
+
     while (!WindowShouldClose()) {
         double now = GetTime();
         double frameTime = now - lastTime;
-        if (frameTime > 0.25) frameTime = 0.25; // avoid spiral of death
+        if (frameTime > 0.25) frameTime = 0.25;
         lastTime = now;
         accumulator += frameTime;
 
         input.recomputeLayout();
         input.handleInput(world);
 
+        // handle scene toggle
+        if (input.useLiquidScene && !liquidLoaded) {
+            scene.loadLiquid(world, input.spawnSize);
+            liquidLoaded = true;
+        } else if (!input.useLiquidScene && liquidLoaded) {
+            scene.loadDefault(world);
+            liquidLoaded = false;
+        }
+
         // Step physics one or more times at fixedDt
         while (accumulator >= fixedDt) {
-            // before stepping, ensure prevPosition is current position (for interpolation)
-            for (auto &b : world.bodies) {
-                b.prevPosition = b.position;
-            }
+            for (auto &b : world.bodies) b.prevPosition = b.position;
 
-            world.step(); // world.dt used internally
+            world.step();
             accumulator -= fixedDt;
         }
 
         // compute alpha for interpolation (0..1)
         float alpha = (float)(accumulator / fixedDt);
-        // render using interpolated positions
         renderer.drawWorld(world, input, alpha);
     }
 

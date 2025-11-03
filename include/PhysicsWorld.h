@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <omp.h>
 #include <vector>
-#include <mutex>
 #include <iostream>
 #include <cmath>
 
@@ -32,7 +31,14 @@ public:
     float maxImpulse = 20000.0f;
     float maxPosCorrection = 200.0f;
 
-    PhysicsWorld() = default;
+    // world bounds (used for boundary collisions)
+    int worldWidth = 800;
+    int worldHeight = 600;
+
+    // reuse spatial hash to avoid reallocation each step
+    SpatialHash grid;
+
+    PhysicsWorld(float cellSize = 64.0f) : grid(cellSize) {}
 
     int addBody(const Body &b) {
         bodies.push_back(b);
@@ -41,7 +47,7 @@ public:
         return (int)bodies.size() - 1;
     }
 
-    // Narrowphase tests
+    // Narrowphase: circle-circle only
     bool circleCircleTest(int ia, int ib, Contact &out) {
         const Body &A = bodies[ia];
         const Body &B = bodies[ib];
@@ -71,96 +77,12 @@ public:
         return true;
     }
 
-    bool circleAABBTest(int ic, int ibox, Contact &out) {
-        const Body &C = bodies[ic];
-        const Body &B = bodies[ibox];
-
-        Vec2 aMin = B.position - B.collider.halfExtents;
-        Vec2 aMax = B.position + B.collider.halfExtents;
-
-        Vec2 closest;
-        closest.x = std::max(aMin.x, std::min(C.position.x, aMax.x));
-        closest.y = std::max(aMin.y, std::min(C.position.y, aMax.y));
-
-        Vec2 n = C.position - closest;
-        float dist2 = n.length2();
-        float r = C.collider.radius;
-
-        if (dist2 >= r*r) return false;
-
-        float dist = std::sqrt(dist2);
-        if (dist > 1e-6f) {
-            out.normal = n / dist;
-        } else {
-            float left = std::abs(C.position.x - aMin.x);
-            float right = std::abs(aMax.x - C.position.x);
-            float top = std::abs(C.position.y - aMin.y);
-            float bottom = std::abs(aMax.y - C.position.y);
-
-            float minDist = left;
-            out.normal = Vec2{-1,0};
-            if (right < minDist) { minDist = right; out.normal = Vec2{1,0}; }
-            if (top < minDist)   { minDist = top;   out.normal = Vec2{0,-1}; }
-            if (bottom < minDist){ minDist = bottom;out.normal = Vec2{0,1}; }
-        }
-
-        out.penetration = r - dist;
-        out.normal = out.normal * -1.0f; // convert to circle -> box
-        out.contactPoint = closest;
-        out.a = ic; out.b = ibox;
-        return true;
-    }
-
     bool testPair(int i, int j, Contact &out) {
-        const Body &A = bodies[i];
-        const Body &B = bodies[j];
-
-        if (A.collider.type == ShapeType::Circle && B.collider.type == ShapeType::Circle) {
-            return circleCircleTest(i, j, out);
-        }
-        if (A.collider.type == ShapeType::Circle && B.collider.type == ShapeType::AABB) {
-            return circleAABBTest(i, j, out);
-        }
-        if (A.collider.type == ShapeType::AABB && B.collider.type == ShapeType::Circle) {
-            bool ok = circleAABBTest(j, i, out);
-            if (ok) {
-                // out.a is circle index (j), out.b is box index (i). we want A->B normal convention; keep as produced.
-                // For solver we'll use out.a/out.b as-is.
-                return true;
-            }
-            return false;
-        }
-        if (A.collider.type == ShapeType::AABB && B.collider.type == ShapeType::AABB) {
-            Vec2 amin = A.position - A.collider.halfExtents;
-            Vec2 amax = A.position + A.collider.halfExtents;
-            Vec2 bmin = B.position - B.collider.halfExtents;
-            Vec2 bmax = B.position + B.collider.halfExtents;
-
-            bool overlapX = (amin.x <= bmax.x) && (amax.x >= bmin.x);
-            bool overlapY = (amin.y <= bmax.y) && (amax.y >= bmin.y);
-
-            if (!overlapX || !overlapY) return false;
-
-            float px = std::min(amax.x - bmin.x, bmax.x - amin.x);
-            float py = std::min(amax.y - bmin.y, bmax.y - amin.y);
-
-            out.a = i; out.b = j;
-            if (px < py) {
-                if (A.position.x < B.position.x) out.normal = Vec2{-1,0};
-                else out.normal = Vec2{1,0};
-                out.penetration = px;
-            } else {
-                if (A.position.y < B.position.y) out.normal = Vec2{0,-1};
-                else out.normal = Vec2{0,1};
-                out.penetration = py;
-            }
-            out.contactPoint = (A.position + B.position) * 0.5f;
-            return true;
-        }
-        return false;
+        // All colliders are circles now
+        return circleCircleTest(i, j, out);
     }
 
-    void resolveCollision(const Contact &c) {
+    inline void resolveCollision(const Contact &c) {
         Body &A = bodies[c.a];
         Body &B = bodies[c.b];
 
@@ -170,7 +92,6 @@ public:
         Vec2 n = c.normal.normalized();
         float velAlongNormal = rv.dot(n);
 
-        // Skip if separating and both dynamic? We still want static-dynamic correct response
         if (velAlongNormal > 0.0f && ! (A.isStatic || B.isStatic)) return;
 
         float invMassA = A.invMass;
@@ -205,9 +126,12 @@ public:
     }
 
     void step() {
+        const int N = (int)bodies.size();
+        if (N == 0) return;
+
         // apply gravity
 #pragma omp parallel for schedule(static)
-        for (int i = 0; i < (int)bodies.size(); ++i) {
+        for (int i = 0; i < N; ++i) {
             Body &b = bodies[i];
             if (b.isStatic) continue;
             b.force += gravity * b.mass;
@@ -215,7 +139,7 @@ public:
 
         // integrate (semi-implicit Euler)
 #pragma omp parallel for schedule(static)
-        for (int i = 0; i < (int)bodies.size(); ++i) {
+        for (int i = 0; i < N; ++i) {
             Body &b = bodies[i];
             if (b.isStatic) {
                 b.velocity = Vec2::zero();
@@ -230,52 +154,89 @@ public:
         }
 
         // broadphase
-        SpatialHash grid(64.0f);
         grid.clear();
-        for (int i = 0; i < (int)bodies.size(); ++i) {
-            grid.insert(bodies, i);
-        }
+        for (int i = 0; i < N; ++i) grid.insert(bodies, i);
 
         auto candidates = grid.getCandidatePairs();
 
-        // narrowphase (parallel-safe accumulation)
-        std::vector<Contact> contacts;
-        contacts.reserve(candidates.size());
-        std::mutex contactsMutex;
+        // narrowphase -- avoid global lock by using thread-local vectors then merge
+        int numThreads = omp_get_max_threads();
+        std::vector<std::vector<Contact>> localContacts(numThreads);
 
-#pragma omp parallel for schedule(dynamic)
-        for (int idx = 0; idx < (int)candidates.size(); ++idx) {
-            auto p = candidates[idx];
-            int i = p.first;
-            int j = p.second;
-            if (i == j) continue;
-            if (bodies[i].isStatic && bodies[j].isStatic) continue;
+#pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+#pragma omp for schedule(dynamic)
+            for (int idx = 0; idx < (int)candidates.size(); ++idx) {
+                auto p = candidates[idx];
+                int i = p.first;
+                int j = p.second;
+                if (i == j) continue;
+                if (bodies[i].isStatic && bodies[j].isStatic) continue;
 
-            Contact c;
-            if (testPair(i, j, c)) {
-                std::lock_guard<std::mutex> lock(contactsMutex);
-                contacts.push_back(c);
+                Contact c;
+                if (testPair(i, j, c)) {
+                    localContacts[tid].push_back(c);
+                }
             }
         }
 
-        // dynamic vs all static AABBs (ensures walls always tested)
-        for (int i = 0; i < (int)bodies.size(); ++i) {
+        // merge local contacts
+        std::vector<Contact> contacts;
+        size_t total = 0;
+        for (const auto &lc : localContacts) total += lc.size();
+        contacts.reserve(total);
+        for (auto &lc : localContacts) {
+            for (auto &c : lc) contacts.push_back(c);
+        }
+
+        // Also ensure dynamic bodies get tested against implicit world bounds
+        for (int i = 0; i < N; ++i) {
             if (bodies[i].isStatic) continue;
-            for (int j = 0; j < (int)bodies.size(); ++j) {
-                if (!bodies[j].isStatic || bodies[j].collider.type != ShapeType::AABB) continue;
-                Contact c;
-                if (testPair(i, j, c)) contacts.push_back(c);
+            Body &b = bodies[i];
+            float r = b.collider.radius;
+            // left
+            if (b.position.x - r < 0.0f) {
+                Contact c; c.a = i; c.b = i; c.normal = Vec2{1,0}; c.penetration = (r - b.position.x); contacts.push_back(c);
+            }
+            // right
+            if (b.position.x + r > worldWidth) {
+                Contact c; c.a = i; c.b = i; c.normal = Vec2{-1,0}; c.penetration = (b.position.x + r - worldWidth); contacts.push_back(c);
+            }
+            // top
+            if (b.position.y - r < 0.0f) {
+                Contact c; c.a = i; c.b = i; c.normal = Vec2{0,1}; c.penetration = (r - b.position.y); contacts.push_back(c);
+            }
+            // bottom
+            if (b.position.y + r > worldHeight) {
+                Contact c; c.a = i; c.b = i; c.normal = Vec2{0,-1}; c.penetration = (b.position.y + r - worldHeight); contacts.push_back(c);
             }
         }
 
         // solve contacts iteratively
         int solverIterations = 8;
         for (int k = 0; k < solverIterations; ++k) {
-            for (const auto &c : contacts) resolveCollision(c);
+            for (const auto &c : contacts) {
+                // boundary contacts (a==b) are special: reflect velocity and correct position
+                if (c.a == c.b) {
+                    int i = c.a;
+                    Body &b = bodies[i];
+                    if (b.isStatic) continue;
+                    Vec2 n = c.normal.normalized();
+                    float velAlong = b.velocity.dot(n);
+                    if (velAlong < 0.0f) b.velocity = b.velocity - n * (1.0f + b.restitution) * velAlong;
+                    // positional correction
+                    float invMass = b.invMass;
+                    Vec2 corr = n * std::max(c.penetration - positionalCorrectionSlop, 0.0f) * positionalCorrectionPercent;
+                    if (!b.isStatic) b.position += corr * invMass;
+                } else {
+                    resolveCollision(c);
+                }
+            }
         }
 
         // sanity clamps & invalid detection
-        for (int i = 0; i < (int)bodies.size(); ++i) {
+        for (int i = 0; i < N; ++i) {
             Body &b = bodies[i];
             if (!std::isfinite(b.position.x) || !std::isfinite(b.position.y) ||
                 !std::isfinite(b.velocity.x) || !std::isfinite(b.velocity.y)) {

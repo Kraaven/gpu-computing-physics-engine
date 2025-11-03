@@ -3,12 +3,9 @@
 #include "raylib.h"
 #include <cmath>
 
-enum class ShapeType { Circle, AABB };
-
 struct Collider {
-  ShapeType type = ShapeType::Circle;
+  // Circle-only collider now
   float radius = 10.0f;
-  Vec2 halfExtents = {10, 10};
 };
 
 struct Body {
