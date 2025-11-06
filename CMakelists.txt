@@ -5,14 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Create folders (idempotent)
+# Create folders
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/src)
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/include)
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/resources)
 
-# -------------------------------------------------------------------------
-# Fetch RayLib (same approach you used)
-# -------------------------------------------------------------------------
+# Fetch RayLib
 include(FetchContent)
 FetchContent_Declare(
     raylib
@@ -21,42 +19,83 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(raylib)
 
-# -------------------------------------------------------------------------
 # Find OpenMP
-# -------------------------------------------------------------------------
 find_package(OpenMP REQUIRED)
 if(OpenMP_CXX_FOUND)
-    message(STATUS "Found OpenMP")
+    message(STATUS "Found OpenMP version: ${OpenMP_CXX_VERSION}")
+    message(STATUS "OpenMP flags: ${OpenMP_CXX_FLAGS}")
 else()
     message(FATAL_ERROR "OpenMP not found. Install a compiler with OpenMP support.")
 endif()
 
-# -------------------------------------------------------------------------
 # Sources
-# -------------------------------------------------------------------------
 file(GLOB_RECURSE SRC_FILES ${CMAKE_SOURCE_DIR}/src/*.cpp ${CMAKE_SOURCE_DIR}/src/*.c)
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-# raylib (the FetchContent provides a target named raylib)
+# Link libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib OpenMP::OpenMP_CXX)
 
 # Platform-specific system libs
 if (WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE winmm gdi32 user32)
 elseif (APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
+    target_link_libraries(${PROJECT_NAME} PRIVATE 
+        "-framework OpenGL" 
+        "-framework Cocoa" 
+        "-framework IOKit" 
+        "-framework CoreVideo"
+    )
 endif()
 
-# Useful compile warnings
+# Aggressive optimization flags
 if (MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive-)
+    target_compile_options(${PROJECT_NAME} PRIVATE 
+        /W4 /permissive- 
+        /O2          # Maximum optimization
+        /Oi          # Enable intrinsics
+        /Ot          # Favor fast code
+        /GL          # Whole program optimization
+        /fp:fast     # Fast floating point
+    )
+    target_link_options(${PROJECT_NAME} PRIVATE /LTCG) # Link-time code generation
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter)
+    # GCC/Clang optimizations
+    target_compile_options(${PROJECT_NAME} PRIVATE 
+        -Wall -Wextra -Wpedantic -Wno-unused-parameter
+        -O3                # Maximum optimization
+        -march=native      # Use CPU-specific instructions
+        -ffast-math        # Fast floating point (careful: less precise)
+        -funroll-loops     # Unroll loops
+        -fomit-frame-pointer
+    )
+    
+    # Additional OpenMP optimizations
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -fopenmp-simd  # Enable SIMD directives
+        )
+    endif()
 endif()
 
-# Install rules (optional)
+# Enable OpenMP offloading if supported (experimental)
+if(OpenMP_CXX_VERSION VERSION_GREATER_EQUAL "4.5")
+    message(STATUS "OpenMP 4.5+ detected - GPU offloading MAY be available")
+    # Uncomment for GPU offload (requires special compiler support):
+    # target_compile_options(${PROJECT_NAME} PRIVATE -fopenmp-targets=nvptx64)
+endif()
+
+# Install rules
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources/ DESTINATION share/${PROJECT_NAME}/resources)
+
+# Print configuration summary
+message(STATUS "======================================")
+message(STATUS "Physics Engine Build Configuration")
+message(STATUS "======================================")
+message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "OpenMP Threads: ${OpenMP_CXX_FLAGS}")
+message(STATUS "======================================")
